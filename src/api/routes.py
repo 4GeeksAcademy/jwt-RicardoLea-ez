@@ -1,13 +1,14 @@
 """
 This module takes care of starting the API Server, Loading the DB and Adding the endpoints
 """
-from flask import Flask, request, jsonify, url_for, Blueprint
+from flask import request, jsonify, Blueprint
 from api.models import db, User
-from api.utils import generate_sitemap, APIException
+from api.utils import APIException
 from flask_cors import CORS
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
-from flask_bcrypt import generate_password_hash, check_password_hash
-from datetime import timedelta
+import traceback
+import bcrypt
+import jwt
+from datetime import datetime, timedelta
 
 api = Blueprint('api', __name__)
 
@@ -24,7 +25,9 @@ def handle_hello():
 @api.route('/signup', methods=['POST'])
 def signup():
     try:
+        print("=== SIGNUP INICIADO ===")
         data = request.get_json()
+        print("Datos recibidos:", data)
         
         if not data:
             return jsonify({"message": "No data provided"}), 400
@@ -32,7 +35,6 @@ def signup():
         email = data.get('email')
         password = data.get('password')
         
-        # Validar que se proporcionaron email y password
         if not email or not password:
             return jsonify({"message": "Email and password are required"}), 400
         
@@ -41,18 +43,20 @@ def signup():
         if existing_user:
             return jsonify({"message": "User already exists"}), 400
         
-        # Hashear la contraseña
-        hashed_password = generate_password_hash(password).decode('utf-8')
+        # Hashear la contraseña con bcrypt (MANERA CORREGIDA)
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
         
         # Crear nuevo usuario
         new_user = User(
             email=email, 
-            password=hashed_password, 
+            password=hashed_password.decode('utf-8'),  # Decodificar antes de guardar
             is_active=True
         )
         
         db.session.add(new_user)
         db.session.commit()
+        
+        print("✅ Usuario registrado exitosamente:", email)
         
         return jsonify({
             "message": "User registered successfully",
@@ -63,14 +67,17 @@ def signup():
         }), 201
         
     except Exception as e:
+        print("❌ ERROR en signup:", str(e))
+        print("🔍 Traceback:", traceback.format_exc())
         db.session.rollback()
-        print(f"Error during registration: {str(e)}")
         return jsonify({"message": "Error during registration"}), 500
 
 @api.route('/login', methods=['POST'])
 def login():
     try:
+        print("=== LOGIN INICIADO ===")
         data = request.get_json()
+        print("Datos recibidos:", data)
         
         if not data:
             return jsonify({"message": "No data provided"}), 400
@@ -78,67 +85,85 @@ def login():
         email = data.get('email')
         password = data.get('password')
         
-        # Validar que se proporcionaron email y password
         if not email or not password:
             return jsonify({"message": "Email and password are required"}), 400
         
         # Buscar usuario
         user = User.query.filter_by(email=email).first()
+        print("Usuario encontrado:", user.email if user else "No encontrado")
         
-        if user and check_password_hash(user.password, password):
-            # Crear token
-            access_token = create_access_token(
-                identity=user.id,
-                expires_delta=timedelta(hours=24)
-            )
+        if user:
+            # Verificar contraseña (MANERA CORREGIDA)
+            # Primero codificar la contraseña ingresada
+            password_bytes = password.encode('utf-8')
             
-            return jsonify({
-                "token": access_token,
-                "user": {
-                    "id": user.id,
-                    "email": user.email
-                },
-                "message": "Login successful"
-            }), 200
+            # Si el password guardado es bytes, usarlo directamente, sino codificarlo
+            if isinstance(user.password, bytes):
+                stored_password = user.password
+            else:
+                stored_password = user.password.encode('utf-8')
+            
+            print("🔐 Verificando contraseña...")
+            if bcrypt.checkpw(password_bytes, stored_password):
+                print("✅ Contraseña correcta")
+                
+                # Crear token JWT simple
+                token_payload = {
+                    'user_id': user.id,
+                    'email': user.email,
+                    'exp': datetime.utcnow() + timedelta(hours=24)
+                }
+                
+                # Usar una clave secreta
+                token = jwt.encode(token_payload, 'secret-key-change-in-production', algorithm='HS256')
+                
+                return jsonify({
+                    "token": token,
+                    "user": {
+                        "id": user.id,
+                        "email": user.email
+                    },
+                    "message": "Login successful"
+                }), 200
+            else:
+                print("❌ Contraseña incorrecta")
+                return jsonify({"message": "Invalid credentials"}), 401
         else:
+            print("❌ Usuario no encontrado")
             return jsonify({"message": "Invalid credentials"}), 401
             
     except Exception as e:
-        print(f"Error during login: {str(e)}")
+        print("❌ ERROR en login:", str(e))
+        print("🔍 Traceback:", traceback.format_exc())
         return jsonify({"message": "Error during login"}), 500
 
-@api.route('/protected', methods=['GET'])
-@jwt_required()
-def protected():
+@api.route('/test-db', methods=['GET'])
+def test_db():
     try:
-        current_user_id = get_jwt_identity()
-        user = User.query.get(current_user_id)
-        
-        if not user:
-            return jsonify({"message": "User not found"}), 404
+        users = User.query.all()
+        user_list = []
+        for user in users:
+            user_data = user.serialize()
+            user_data['password_type'] = type(user.password).__name__
+            user_list.append(user_data)
             
         return jsonify({
-            "message": f"Hello {user.email}, you are accessing a protected endpoint!",
-            "user": user.serialize()
+            "message": "Database connection successful",
+            "users_count": len(users),
+            "users": user_list
         }), 200
-        
     except Exception as e:
-        return jsonify({"message": "Error accessing protected endpoint"}), 500
+        return jsonify({"error": str(e)}), 500
 
-@api.route('/validate-token', methods=['GET'])
-@jwt_required()
-def validate_token():
+@api.route('/reset-users', methods=['POST'])
+def reset_users():
+    """Eliminar todos los usuarios existentes para empezar limpio"""
     try:
-        current_user_id = get_jwt_identity()
-        user = User.query.get(current_user_id)
-        
-        if not user:
-            return jsonify({"valid": False}), 401
-            
-        return jsonify({
-            "valid": True,
-            "user": user.serialize()
-        }), 200
-        
+        users = User.query.all()
+        for user in users:
+            db.session.delete(user)
+        db.session.commit()
+        return jsonify({"message": f"Deleted {len(users)} users"}), 200
     except Exception as e:
-        return jsonify({"valid": False}), 401
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500

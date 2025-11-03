@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import useGlobalReducer from "../hooks/useGlobalReducer";
 
-export const Signup = () => {
+export const Login = () => {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
@@ -23,9 +23,9 @@ export const Signup = () => {
                 throw new Error("VITE_BACKEND_URL is not defined in .env file");
             }
 
-            console.log("Enviando registro a:", backendUrl + "/api/signup");
+            console.log("Enviando login a:", backendUrl + "/api/login");
 
-            const response = await fetch(backendUrl + "/api/signup", {
+            const response = await fetch(backendUrl + "/api/login", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -40,10 +40,17 @@ export const Signup = () => {
             console.log("Respuesta del backend:", data);
 
             if (response.ok) {
-                // Registro exitoso, redirigir al login
-                navigate("/login");
+                // Login exitoso, guardar token y redirigir
+                dispatch({
+                    type: "set_token",
+                    payload: {
+                        token: data.token,
+                        user: data.user
+                    }
+                });
+                navigate("/private");
             } else {
-                setError(data.message || "Error en el registro");
+                setError(data.message || "Error en el inicio de sesión");
             }
         } catch (error) {
             console.error("Error completo:", error);
@@ -59,7 +66,7 @@ export const Signup = () => {
                 <div className="col-md-6">
                     <div className="card">
                         <div className="card-body">
-                            <h2 className="card-title text-center mb-4">Registro</h2>
+                            <h2 className="card-title text-center mb-4">Iniciar Sesión</h2>
 
                             {error && (
                                 <div className="alert alert-danger" role="alert">
@@ -101,13 +108,13 @@ export const Signup = () => {
                                     className="btn btn-primary w-100"
                                     disabled={loading}
                                 >
-                                    {loading ? "Registrando..." : "Registrarse"}
+                                    {loading ? "Iniciando sesión..." : "Iniciar Sesión"}
                                 </button>
                             </form>
 
                             <div className="text-center mt-3">
                                 <p>
-                                    ¿Ya tienes cuenta? <Link to="/login">Inicia sesión</Link>
+                                    ¿No tienes cuenta? <Link to="/signup">Regístrate</Link>
                                 </p>
                             </div>
                         </div>
