@@ -1,6 +1,7 @@
 
 import click
 from api.models import db, User
+from flask_bcrypt import generate_password_hash
 
 """
 In this file, you can add as many commands as you want using the @app.cli.command decorator
@@ -21,7 +22,7 @@ def setup_commands(app):
         for x in range(1, int(count) + 1):
             user = User()
             user.email = "test_user" + str(x) + "@test.com"
-            user.password = "123456"
+            user.password = generate_password_hash("123456").decode('utf-8')
             user.is_active = True
             db.session.add(user)
             db.session.commit()
